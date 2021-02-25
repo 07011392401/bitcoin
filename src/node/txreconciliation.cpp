@@ -131,19 +131,19 @@ struct ReconciliationInitByThem {
  */
 class ReconciliationState
 {
+    /**
+     * Reconciliation involves exchanging sketches, which efficiently represent transactions each
+     * peer wants to announce. Sketches are computed over transaction short IDs.
+     * These values are used to salt short IDs.
+     */
+    uint64_t m_k0, m_k1;
+
 public:
     /**
      * Reconciliation protocol assumes using one role consistently: either a reconciliation
      * initiator (requesting sketches), or responder (sending sketches). This defines our role.
      * */
     bool m_we_initiate;
-
-    /**
-     * These values are used to salt short IDs, which is necessary for transaction reconciliations.
-     * TODO: they are public to ignore -Wunused-private-field. They should be made private once they
-     * are used.
-     */
-    uint64_t m_k0, m_k1;
 
     /**
      * Store all transactions which we would relay to the peer (policy checks passed, etc.)
@@ -156,7 +156,19 @@ public:
     ReconciliationInitByUs m_state_init_by_us;
     ReconciliationInitByThem m_state_init_by_them;
 
-    ReconciliationState(bool we_initiate, uint64_t k0, uint64_t k1) : m_we_initiate(we_initiate), m_k0(k0), m_k1(k1) {}
+    ReconciliationState(uint64_t k0, uint64_t k1, bool we_initiate) : m_k0(k0), m_k1(k1), m_we_initiate(we_initiate) {}
+
+    /**
+     * Reconciliation sketches are computed over short transaction IDs.
+     * Short IDs are salted with a link-specific constant value.
+     */
+    uint32_t ComputeShortID(const uint256 wtxid) const
+    {
+        const uint64_t s = SipHashUint256(m_k0, m_k1, wtxid);
+        const uint32_t short_txid = 1 + (s & 0xFFFFFFFF);
+        return short_txid;
+    }
+
 };
 
 } // namespace
@@ -267,7 +279,7 @@ class TxReconciliationTracker::Impl
                  peer_id, we_initiate, they_initiate);
 
         uint256 full_salt = ComputeSalt(*local_salt, remote_salt);
-        recon_state->second = ReconciliationState(we_initiate, full_salt.GetUint64(0), full_salt.GetUint64(1));
+        recon_state->second = ReconciliationState(full_salt.GetUint64(0), full_salt.GetUint64(1), we_initiate);
         return true;
     }
 
