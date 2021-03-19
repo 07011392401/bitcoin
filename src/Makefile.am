@@ -196,6 +196,7 @@ BITCOIN_CORE_H = \
   node/minisketchwrapper.h \
   node/psbt.h \
   node/transaction.h \
+  node/txreconciliation.h \
   node/ui_interface.h \
   node/utxo_snapshot.h \
   noui.h \
@@ -371,6 +372,7 @@ libbitcoin_node_a_SOURCES = \
   node/minisketchwrapper.cpp \
   node/psbt.cpp \
   node/transaction.cpp \
+  node/txreconciliation.cpp \
   node/ui_interface.cpp \
   noui.cpp \
   policy/fees.cpp \

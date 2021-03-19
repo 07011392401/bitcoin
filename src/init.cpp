@@ -39,6 +39,7 @@
 #include <node/chainstate.h>
 #include <node/context.h>
 #include <node/miner.h>
+#include <node/txreconciliation.h>
 #include <node/ui_interface.h>
 #include <policy/feerate.h>
 #include <policy/fees.h>
@@ -476,6 +477,7 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-seednode=<ip>", "Connect to a node to retrieve peer addresses, and disconnect. This option can be specified multiple times to connect to multiple nodes.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-networkactive", "Enable all P2P network activity (default: 1). Can be changed by the setnetworkactive RPC command", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-timeout=<n>", strprintf("Specify socket connection timeout in milliseconds. If an initial attempt to connect is unsuccessful after this amount of time, drop it (minimum: 1, default: %d)", DEFAULT_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-txrecon", strprintf("Enable transaction reconciliations per BIP-330 (default: %d)", DEFAULT_TXRECON_ENABLE), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify a p2p connection timeout delay in seconds. After connecting to a peer, wait this amount of time before considering disconnection based on inactivity (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::CONNECTION);
@@ -1560,9 +1562,17 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     ChainstateManager& chainman = *Assert(node.chainman);
 
+    std::unique_ptr<TxReconciliationTracker> txreconciliation;
+    // While Erlay support is incomplete, it must be enabled explicitly via -txrecon.
+    // This argument can go away after Erlay support is complete.
+    if (gArgs.GetBoolArg("-txrecon", DEFAULT_TXRECON_ENABLE)) {
+        txreconciliation = std::make_unique<TxReconciliationTracker>(RECON_VERSION);
+    }
+
     assert(!node.peerman);
     node.peerman = PeerManager::make(chainparams, *node.connman, *node.addrman, node.banman.get(),
-                                     chainman, *node.mempool, ignores_incoming_txs);
+                                     chainman, *node.mempool, std::move(txreconciliation),
+                                     ignores_incoming_txs);
     RegisterValidationInterface(node.peerman.get());
 
     // ********************************************************* Step 8: start indexers
