@@ -101,6 +101,13 @@ class TxReconciliationTracker::Impl
      */
     std::unordered_map<NodeId, std::variant<uint64_t, ReconciliationState>> m_states GUARDED_BY(m_mutex);
 
+    /**
+     * Maintains a queue of reconciliations we should initiate. To achieve higher bandwidth
+     * conservation and avoid overflows, we should reconcile in the same order, because then it’s
+     * easier to estimate set difference size.
+     */
+    std::deque<NodeId> m_queue GUARDED_BY(m_mutex);
+
 public:
     explicit Impl(uint32_t recon_version) : m_recon_version(recon_version) {}
 
@@ -152,6 +159,10 @@ public:
         // The peer set both flags to false, we treat it as a protocol violation.
         if (!(they_initiate || we_initiate)) return false;
 
+        if (we_initiate) {
+            m_queue.push_back(peer_id);
+        }
+
         LogPrint(BCLog::TXRECON, "Register peer=%d with the following params: " /* Continued */
                                  "we_initiate=%i, they_initiate=%i.\n",
                  peer_id, we_initiate, they_initiate);
@@ -192,6 +203,7 @@ public:
     {
         LOCK(m_mutex);
         if (m_states.erase(peer_id)) {
+            m_queue.erase(std::remove(m_queue.begin(), m_queue.end(), peer_id), m_queue.end());
             LogPrint(BCLog::TXRECON, "Forget reconciliation state of peer=%d.\n", peer_id);
         }
     }
