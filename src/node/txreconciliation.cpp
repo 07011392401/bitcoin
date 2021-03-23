@@ -31,6 +31,11 @@ struct ReconciliationSet {
     /** Transactions we want to announce to the peer */
     std::set<uint256> m_wtxids;
 
+    /** Get a number of transactions in the set. */
+    size_t GetSize() const {
+        return m_wtxids.size();
+    }
+
     /** This should be called at the end of every reconciliation to avoid unbounded state growth. */
     void Clear() {
         m_wtxids.clear();
@@ -161,7 +166,7 @@ public:
         }
 
         LogPrint(BCLog::NET, "Added %i new transactions to the reconciliation set for peer=%d. " /* Continued */
-            "Now the set contains %i transactions.\n", added, peer_id, recon_state.m_local_set.m_wtxids.size());
+            "Now the set contains %i transactions.\n", added, peer_id, recon_state.m_local_set.GetSize());
     }
 
     void TryRemovingFromReconSet(NodeId peer_id, const uint256 wtxid_to_remove)
@@ -187,6 +192,14 @@ public:
         const auto recon_state = m_states.find(peer_id);
         return (recon_state != m_states.end() &&
                 std::holds_alternative<ReconciliationState>(recon_state->second));
+    }
+
+    size_t GetPeerSetSize(NodeId peer_id) const
+    {
+        assert(IsPeerRegistered(peer_id));
+        LOCK(m_mutex);
+        const auto recon_state = std::get<ReconciliationState>(m_states.find(peer_id)->second);
+        return recon_state.m_local_set.GetSize();
     }
 };
 
@@ -225,4 +238,9 @@ void TxReconciliationTracker::ForgetPeer(NodeId peer_id)
 bool TxReconciliationTracker::IsPeerRegistered(NodeId peer_id) const
 {
     return m_impl->IsPeerRegistered(peer_id);
+}
+
+std::optional<size_t> TxReconciliationTracker::GetPeerSetSize(NodeId peer_id) const
+{
+    return m_impl->GetPeerSetSize(peer_id);
 }
