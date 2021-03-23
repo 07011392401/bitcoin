@@ -269,7 +269,14 @@ extern const char* WTXIDRELAY;
  * The salt is used to compute short txids needed for efficient reconciliation,
  * as described by BIP 330.
  */
-extern const char* SENDRECON;
+extern const char *SENDRECON;
+/**
+ * Requests a reconciliation, and provides local reconciliation set size
+ * and coefficient used to accurately estimate reconciliation set difference
+ * for a peer to construct a set sketch.
+ * Peer should respond with "sketch" message.
+ */
+extern const char *REQRECON;
 }; // namespace NetMsgType
 
 /* Get a vector of all valid message types (see above) */
