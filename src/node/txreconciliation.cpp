@@ -21,6 +21,13 @@ const HashWriter RECON_SALT_HASHER = TaggedHash(RECON_STATIC_SALT);
 /** Announce transactions via full wtxid to a limited number of inbound and outbound peers. */
 constexpr double INBOUND_FANOUT_DESTINATIONS_FRACTION = 0.1;
 constexpr double OUTBOUND_FANOUT_DESTINATIONS_FRACTION = 0.1;
+/** Coefficient used to estimate reconciliation set differences. */
+constexpr double RECON_Q = 0.25;
+/**
+ * Used to convert a floating point reconciliation coefficient q to integer for transmission.
+ * Specified by BIP-330.
+ */
+constexpr uint16_t Q_PRECISION{(2 << 14) - 1};
 /**
  * Interval between initiating reconciliations with peers.
  * This value allows to reconcile ~(7 tx/s * 8s) transactions during normal operation.
@@ -29,6 +36,14 @@ constexpr double OUTBOUND_FANOUT_DESTINATIONS_FRACTION = 0.1;
  * Less frequent reconciliations would introduce high transaction relay latency.
  */
 constexpr std::chrono::microseconds RECON_REQUEST_INTERVAL{8s};
+
+/**
+ * Represents phase of the current reconciliation round with a peer.
+ */
+enum Phase {
+    NONE,
+    INIT_REQUESTED,
+};
 
 /**
  * Salt (specified by BIP-330) constructed from contributions from both peers. It is used
@@ -72,6 +87,9 @@ public:
      * reconcile this set with a set on the peer's side.
      */
     std::set<uint256> m_local_set;
+
+    /** Keep track of the reconciliation phase with the peer. */
+    Phase m_phase_init_by_us{Phase::NONE};
 
     TxReconciliationState(bool we_initiate, uint64_t k0, uint64_t k1) : m_we_initiate(we_initiate), m_k0(k0), m_k1(k1) {}
 };
@@ -221,6 +239,40 @@ private:
         recon_state.m_local_set.erase(wtxid_to_remove);
     }
 
+    std::optional<std::pair<uint16_t, uint16_t>> MaybeRequestReconciliation(NodeId peer_id) EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
+    {
+        AssertLockNotHeld(m_txreconciliation_mutex);
+        if (!IsPeerRegistered(peer_id)) return std::nullopt;
+        LOCK(m_txreconciliation_mutex);
+        auto& recon_state = std::get<TxReconciliationState>(m_states.find(peer_id)->second);
+
+        if (m_queue.size() > 0) {
+            // Request transaction reconciliation periodically to efficiently exchange transactions.
+            // To make reconciliation predictable and efficient, we reconcile with peers in order
+            // based on the queue, taking a delay between requests.
+            auto current_time = GetTime<std::chrono::seconds>();
+            if (m_next_recon_request <= current_time && m_queue.front() == peer_id) {
+                m_queue.pop_front();
+                m_queue.push_back(peer_id);
+                UpdateNextReconRequest(current_time);
+                if (recon_state.m_phase_init_by_us != Phase::NONE) return std::nullopt;
+                recon_state.m_phase_init_by_us = Phase::INIT_REQUESTED;
+
+                size_t local_set_size = recon_state.m_local_set.size();
+
+                LogPrint(BCLog::NET, "Initiate reconciliation with peer=%d with the following params: " /* Continued */
+                    "local_set_size=%i\n", peer_id, local_set_size);
+
+                // In future, RECON_Q could be recomputed after every reconciliation based on the
+                // set differences. For now, it provides good enough results without recompute
+                // complexity, but we communicate it here to allow backward compatibility if
+                // the value is changed or made dynamic.
+                return std::make_pair(local_set_size, RECON_Q * Q_PRECISION);
+            }
+        }
+        return std::nullopt;
+    }
+
     size_t GetPeerSetSize(NodeId peer_id) const EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
     {
         AssertLockNotHeld(m_txreconciliation_mutex);
@@ -320,6 +372,11 @@ void TxReconciliationTracker::AddToReconSet(NodeId peer_id, const std::vector<ui
 void TxReconciliationTracker::TryRemovingFromReconSet(NodeId peer_id, const uint256 wtxid_to_remove)
 {
     m_impl->TryRemovingFromReconSet(peer_id, wtxid_to_remove);
+}
+
+std::optional<std::pair<uint16_t, uint16_t>> TxReconciliationTracker::MaybeRequestReconciliation(NodeId peer_id)
+{
+    return m_impl->MaybeRequestReconciliation(peer_id);
 }
 
 size_t TxReconciliationTracker::GetPeerSetSize(NodeId peer_id) const

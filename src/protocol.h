@@ -266,6 +266,13 @@ extern const char* WTXIDRELAY;
  * txreconciliation, as described by BIP 330.
  */
 extern const char* SENDTXRCNCL;
+/**
+ * Requests a reconciliation, and provides local reconciliation set size
+ * and coefficient used to accurately estimate reconciliation set difference
+ * for a peer to construct a set sketch.
+ * Peer should respond with "sketch" message.
+ */
+extern const char *REQTXRCNCL;
 }; // namespace NetMsgType
 
 /* Get a vector of all valid message types (see above) */
