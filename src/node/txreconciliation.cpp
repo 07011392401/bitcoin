@@ -8,6 +8,7 @@
 #include <util/system.h>
 
 #include <unordered_map>
+#include <util/hasher.h>
 #include <variant>
 
 
@@ -17,6 +18,9 @@ namespace {
 const std::string RECON_STATIC_SALT = "Tx Relay Salting";
 const HashWriter RECON_SALT_HASHER = TaggedHash(RECON_STATIC_SALT);
 
+/** Announce transactions via full wtxid to a limited number of inbound and outbound peers. */
+constexpr double INBOUND_FANOUT_DESTINATIONS_FRACTION = 0.1;
+constexpr double OUTBOUND_FANOUT_DESTINATIONS_FRACTION = 0.1;
 /**
  * Salt (specified by BIP-330) constructed from contributions from both peers. It is used
  * to compute transaction short IDs, which are then used to construct a sketch representing a set
@@ -70,6 +74,12 @@ class TxReconciliationTracker::Impl
 {
 private:
     mutable Mutex m_txreconciliation_mutex;
+
+    /**
+     * We need a ReconciliationTracker-wide randomness to decide to which peers we should flood a
+     * given transaction based on a (w)txid.
+     */
+    const SaltedTxidHasher txidHasher;
 
     // Local protocol version
     uint32_t m_recon_version;
@@ -191,6 +201,41 @@ public:
         return (recon_state != m_states.end() &&
                 std::holds_alternative<TxReconciliationState>(recon_state->second));
     }
+
+    bool ShouldFloodTo(uint256 wtxid, NodeId peer_id) const EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
+    {
+        AssertLockNotHeld(m_txreconciliation_mutex);
+        if (!IsPeerRegistered(peer_id)) return true;
+        LOCK(m_txreconciliation_mutex);
+        const auto recon_state = std::get<TxReconciliationState>(m_states.find(peer_id)->second);
+
+        // We assume that reconciliation is always initiated from inbound to outbound to avoid
+        // code complexity.
+        std::vector<NodeId> eligible_peers;
+
+        const bool we_initiate = recon_state.m_we_initiate;
+        // Find all peers of the similar reconciliation direction.
+        std::for_each(m_states.begin(), m_states.end(),
+            [&eligible_peers, we_initiate](std::pair<NodeId, std::variant<uint64_t, TxReconciliationState>> indexed_state) {
+                const auto cur_state = std::get<TxReconciliationState>(indexed_state.second);
+                if (cur_state.m_we_initiate == we_initiate) eligible_peers.push_back(indexed_state.first);
+            }
+        );
+
+        // TODO: there should be a cleaner way to do this.
+        size_t flood_index_modulo;
+        if (we_initiate) {
+            flood_index_modulo = 1.0 / OUTBOUND_FANOUT_DESTINATIONS_FRACTION;
+        } else {
+            flood_index_modulo = 1.0 / INBOUND_FANOUT_DESTINATIONS_FRACTION;
+        }
+
+        const auto it = std::find(eligible_peers.begin(), eligible_peers.end(), peer_id);
+        assert(it != eligible_peers.end());
+
+        const size_t peer_index = it - eligible_peers.begin();
+        return txidHasher(wtxid) % flood_index_modulo == peer_index % flood_index_modulo;
+    }
 };
 
 TxReconciliationTracker::TxReconciliationTracker(uint32_t recon_version) : m_impl{std::make_unique<TxReconciliationTracker::Impl>(recon_version)} {}
@@ -228,4 +273,9 @@ void TxReconciliationTracker::ForgetPeer(NodeId peer_id)
 bool TxReconciliationTracker::IsPeerRegistered(NodeId peer_id) const
 {
     return m_impl->IsPeerRegistered(peer_id);
+}
+
+bool TxReconciliationTracker::ShouldFloodTo(uint256 wtxid, NodeId peer_id) const
+{
+    return m_impl->ShouldFloodTo(wtxid, peer_id);
 }
