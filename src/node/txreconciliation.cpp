@@ -183,7 +183,7 @@ public:
     {
         assert(IsPeerRegistered(peer_id));
         LOCK(m_mutex);
-        auto recon_state = std::get<ReconciliationState>(m_states.find(peer_id)->second);
+        auto& recon_state = std::get<ReconciliationState>(m_states.find(peer_id)->second);
 
         recon_state.m_local_set.m_wtxids.erase(wtxid_to_remove);
     }
