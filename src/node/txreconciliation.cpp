@@ -184,6 +184,16 @@ public:
         recon_state.m_local_set.erase(wtxid_to_remove);
     }
 
+    size_t GetPeerSetSize(NodeId peer_id) const EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
+    {
+        AssertLockNotHeld(m_txreconciliation_mutex);
+        assert(IsPeerRegistered(peer_id));
+        LOCK(m_txreconciliation_mutex);
+        const auto& recon_state = std::get<TxReconciliationState>(m_states.find(peer_id)->second);
+
+        return recon_state.m_local_set.size();
+    }
+
     void ForgetPeer(NodeId peer_id) EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
     {
         AssertLockNotHeld(m_txreconciliation_mutex);
@@ -236,6 +246,15 @@ public:
         const size_t peer_index = it - eligible_peers.begin();
         return txidHasher(wtxid) % flood_index_modulo == peer_index % flood_index_modulo;
     }
+
+    bool CurrentlyReconcilingTx(NodeId peer_id, const uint256 wtxid) const EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
+    {
+        if (!IsPeerRegistered(peer_id)) return false;
+        LOCK(m_txreconciliation_mutex);
+        const auto recon_state = std::get<TxReconciliationState>(m_states.find(peer_id)->second);
+        return recon_state.m_local_set.count(wtxid) > 0;
+    }
+
 };
 
 TxReconciliationTracker::TxReconciliationTracker(uint32_t recon_version) : m_impl{std::make_unique<TxReconciliationTracker::Impl>(recon_version)} {}
@@ -265,6 +284,11 @@ void TxReconciliationTracker::TryRemovingFromReconSet(NodeId peer_id, const uint
     m_impl->TryRemovingFromReconSet(peer_id, wtxid_to_remove);
 }
 
+size_t TxReconciliationTracker::GetPeerSetSize(NodeId peer_id) const
+{
+    return m_impl->GetPeerSetSize(peer_id);
+}
+
 void TxReconciliationTracker::ForgetPeer(NodeId peer_id)
 {
     m_impl->ForgetPeer(peer_id);
@@ -278,4 +302,9 @@ bool TxReconciliationTracker::IsPeerRegistered(NodeId peer_id) const
 bool TxReconciliationTracker::ShouldFloodTo(uint256 wtxid, NodeId peer_id) const
 {
     return m_impl->ShouldFloodTo(wtxid, peer_id);
+}
+
+bool TxReconciliationTracker::CurrentlyReconcilingTx(NodeId peer_id, const uint256 wtxid) const
+{
+    return m_impl->CurrentlyReconcilingTx(peer_id, wtxid);
 }
