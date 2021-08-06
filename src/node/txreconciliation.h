@@ -100,6 +100,11 @@ public:
      * Returns whether for the given call the peer is chosen as a low-fanout destination.
      */
     bool ShouldFloodTo(uint256 wtxid, NodeId peer_id) const;
+
+    /**
+     * Check whether a particular transaction is being currently reconciled with a given peer.
+     */
+    bool CurrentlyReconcilingTx(NodeId peer_id, const uint256 wtxid) const;
 };
 
 #endif // BITCOIN_NODE_TXRECONCILIATION_H

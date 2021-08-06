@@ -246,6 +246,15 @@ public:
         const size_t peer_index = it - eligible_peers.begin();
         return txidHasher(wtxid) % flood_index_modulo == peer_index % flood_index_modulo;
     }
+
+    bool CurrentlyReconcilingTx(NodeId peer_id, const uint256 wtxid) const
+    {
+        if (!IsPeerRegistered(peer_id)) return false;
+        LOCK(m_mutex);
+        const auto recon_state = std::get<ReconciliationState>(m_states.find(peer_id)->second);
+        return recon_state.m_local_set.m_wtxids.count(wtxid) > 0;
+    }
+
 };
 
 TxReconciliationTracker::TxReconciliationTracker(uint32_t recon_version) : m_impl{std::make_unique<TxReconciliationTracker::Impl>(recon_version)} {}
@@ -293,4 +302,9 @@ std::optional<size_t> TxReconciliationTracker::GetPeerSetSize(NodeId peer_id) co
 bool TxReconciliationTracker::ShouldFloodTo(uint256 wtxid, NodeId peer_id) const
 {
     return m_impl->ShouldFloodTo(wtxid, peer_id);
+}
+
+bool TxReconciliationTracker::CurrentlyReconcilingTx(NodeId peer_id, const uint256 wtxid) const
+{
+    return m_impl->CurrentlyReconcilingTx(peer_id, wtxid);
 }
