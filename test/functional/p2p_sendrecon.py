@@ -146,6 +146,34 @@ class SendReconTest(BitcoinTestFramework):
             peer.send_message(msg_verack())
         peer.peer_disconnect()
 
+        self.log.info('SENDRECON sent to an outbound')
+        peer = self.nodes[0].add_outbound_p2p_connection(
+            SendReconReceiver(), wait_for_verack=True, p2p_idx=1, connection_type="outbound-full-relay")
+        assert peer.sendrecon_msg_received
+        assert peer.sendrecon_msg_received.initiator
+        assert not peer.sendrecon_msg_received.responder
+        assert_equal(peer.sendrecon_msg_received.version, 1)
+        peer.peer_disconnect()
+
+        self.log.info('SENDRECON should not be sent if block-relay-only')
+        peer = self.nodes[0].add_outbound_p2p_connection(
+            SendReconReceiver(), wait_for_verack=True, p2p_idx=2, connection_type="block-relay-only")
+        assert not peer.sendrecon_msg_received
+        peer.peer_disconnect()
+
+        self.log.info('SENDRECON if block-relay-only triggers a disconnect')
+        peer = self.nodes[0].add_outbound_p2p_connection(
+            PeerNoVerack(), wait_for_verack=False, p2p_idx=3, connection_type="block-relay-only")
+        peer.send_message(create_sendrecon_msg(initiator=False))
+        peer.wait_for_disconnect()
+
+        self.log.info('SENDRECON with initiator=1 and responder=0 from outbound triggers a disconnect')
+        sendrecon_wrong_role = create_sendrecon_msg(initiator=True)
+        peer = self.nodes[0].add_outbound_p2p_connection(
+            P2PInterface(), wait_for_verack=False, p2p_idx=4, connection_type="outbound-full-relay")
+        peer.send_message(sendrecon_wrong_role)
+        peer.wait_for_disconnect()
+
         self.log.info('SENDRECON not sent if -txrecon flag is not set')
         self.restart_node(0, [])
         peer = self.nodes[0].add_p2p_connection(SendReconReceiver(), send_version=True, wait_for_verack=True)
