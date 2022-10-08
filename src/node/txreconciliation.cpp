@@ -52,6 +52,14 @@ public:
      */
     uint64_t m_k0, m_k1;
 
+    /**
+     * Store all wtxids which we would announce to the peer (policy checks passed, etc.)
+     * in this set instead of announcing them right away. When reconciliation time comes, we will
+     * compute a compressed representation of this set ("sketch") and use it to efficiently
+     * reconcile this set with a set on the peer's side.
+     */
+    std::set<uint256> m_local_set;
+
     TxReconciliationState(bool we_initiate, uint64_t k0, uint64_t k1) : m_we_initiate(we_initiate), m_k0(k0), m_k1(k1) {}
 };
 
@@ -137,6 +145,35 @@ public:
         return SUCCESS;
     }
 
+    void AddToReconSet(NodeId peer_id, const std::vector<uint256>& txs_to_reconcile) EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
+    {
+        AssertLockNotHeld(m_txreconciliation_mutex);
+        assert(txs_to_reconcile.size() > 0);
+        assert(IsPeerRegistered(peer_id));
+        LOCK(m_txreconciliation_mutex);
+        auto& recon_state = std::get<TxReconciliationState>(m_states.find(peer_id)->second);
+
+        size_t added = 0;
+        for (auto& wtxid: txs_to_reconcile) {
+            if (recon_state.m_local_set.insert(wtxid).second) {
+                ++added;
+            }
+        }
+
+        LogPrint(BCLog::NET, "Added %i new transactions to the reconciliation set for peer=%d. " /* Continued */
+            "Now the set contains %i transactions.\n", added, peer_id, recon_state.m_local_set.size());
+    }
+
+    void TryRemovingFromReconSet(NodeId peer_id, const uint256 wtxid_to_remove) EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
+    {
+        AssertLockNotHeld(m_txreconciliation_mutex);
+        assert(IsPeerRegistered(peer_id));
+        LOCK(m_txreconciliation_mutex);
+        auto& recon_state = std::get<TxReconciliationState>(m_states.find(peer_id)->second);
+
+        recon_state.m_local_set.erase(wtxid_to_remove);
+    }
+
     void ForgetPeer(NodeId peer_id) EXCLUSIVE_LOCKS_REQUIRED(!m_txreconciliation_mutex)
     {
         AssertLockNotHeld(m_txreconciliation_mutex);
@@ -171,6 +208,16 @@ ReconciliationRegisterResult TxReconciliationTracker::RegisterPeer(NodeId peer_i
 {
     return m_impl->RegisterPeer(peer_id, is_peer_inbound, is_peer_recon_initiator, is_peer_recon_responder,
                                 peer_recon_version, remote_salt);
+}
+
+void TxReconciliationTracker::AddToReconSet(NodeId peer_id, const std::vector<uint256>& txs_to_reconcile)
+{
+    m_impl->AddToReconSet(peer_id, txs_to_reconcile);
+}
+
+void TxReconciliationTracker::TryRemovingFromReconSet(NodeId peer_id, const uint256 wtxid_to_remove)
+{
+    m_impl->TryRemovingFromReconSet(peer_id, wtxid_to_remove);
 }
 
 void TxReconciliationTracker::ForgetPeer(NodeId peer_id)
