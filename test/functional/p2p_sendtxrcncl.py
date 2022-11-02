@@ -131,18 +131,18 @@ class SendTxRcnclTest(BitcoinTestFramework):
 
         self.log.info('SENDTXRCNCL should not be sent if block-relay-only')
         peer = self.nodes[0].add_outbound_p2p_connection(
-            SendTxrcnclReceiver(), wait_for_verack=True, p2p_idx=2, connection_type="block-relay-only")
+            SendTxrcnclReceiver(), wait_for_verack=True, p2p_idx=1, connection_type="block-relay-only")
         assert not peer.sendtxrcncl_msg_received
         peer.peer_disconnect()
 
         self.log.info("SENDTXRCNCL should not be sent if feeler")
-        peer = self.nodes[0].add_outbound_p2p_connection(P2PFeelerReceiver(), p2p_idx=2, connection_type="feeler")
+        peer = self.nodes[0].add_outbound_p2p_connection(P2PFeelerReceiver(), p2p_idx=1, connection_type="feeler")
         assert not peer.sendtxrcncl_msg_received
         peer.peer_disconnect()
 
         self.log.info("SENDTXRCNCL should not be sent if addrfetch")
         peer = self.nodes[0].add_outbound_p2p_connection(
-            SendTxrcnclReceiver(), wait_for_verack=True, p2p_idx=2, connection_type="addr-fetch")
+            SendTxrcnclReceiver(), wait_for_verack=True, p2p_idx=1, connection_type="addr-fetch")
         assert not peer.sendtxrcncl_msg_received
         peer.peer_disconnect()
 
@@ -223,7 +223,7 @@ class SendTxRcnclTest(BitcoinTestFramework):
         # Now, *receiving* from *outbound*.
         self.log.info('SENDTXRCNCL if block-relay-only triggers a disconnect')
         peer = self.nodes[0].add_outbound_p2p_connection(
-            PeerNoVerack(), wait_for_verack=False, p2p_idx=3, connection_type="block-relay-only")
+            PeerNoVerack(), wait_for_verack=False, p2p_idx=1, connection_type="block-relay-only")
         with self.nodes[0].assert_debug_log(["we indicated no tx relay; disconnecting"]):
             peer.send_message(create_sendtxrcncl_msg())
             peer.wait_for_disconnect()
